@@ -8,32 +8,53 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js" type="text/javascript"></script>
   <style>
     :root { --bg: #121214; --card: #1e1e24; --accent: #00e5ff; --success: #00e676; --text: #ffffff; }
-    body { font-family: 'Segoe UI', Roboto, sans-serif; background-color: var(--bg); color: var(--text); padding: 40px; display: flex; flex-direction: column; align-items: center; text-align: center; }
-    .card { background: var(--card); padding: 30px; border-radius: 12px; width: 100%; max-width: 500px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-    h1 { margin-top: 0; color: var(--accent); }
+    body { font-family: 'Segoe UI', Roboto, sans-serif; background-color: var(--bg); color: var(--text); padding: 20px; display: flex; flex-direction: column; align-items: center; text-align: center; }
+    .card { background: var(--card); padding: 30px; border-radius: 12px; width: 100%; max-width: 500px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); margin-bottom: 20px; }
+    h1 { margin-top: 0; color: var(--accent); font-size: 1.5rem; }
     button { background: var(--accent); color: #000; border: none; padding: 15px; width: 100%; font-weight: bold; border-radius: 6px; cursor: pointer; font-size: 1.1rem; margin-bottom: 15px; transition: 0.2s; }
     button:hover { opacity: 0.9; }
     button:disabled { background: #555; color: #888; cursor: not-allowed; }
-    .log-box { background: #000; color: #00e676; font-family: monospace; padding: 15px; border-radius: 6px; height: 150px; overflow-y: auto; text-align: left; margin-top: 20px; font-size: 0.9rem; }
+    .log-box { background: #000; color: #00e676; font-family: monospace; padding: 15px; border-radius: 6px; height: 100px; overflow-y: auto; text-align: left; margin-top: 15px; font-size: 0.85rem; }
+    
+    /* Live Dashboard Styles */
+    .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: 100%; margin-top: 20px; }
+    .metric-card { background: #2a2a35; padding: 12px; border-radius: 8px; text-align: center; border: 1px solid #333; }
+    .metric-label { font-size: 0.75rem; color: #aaa; text-transform: uppercase; }
+    .metric-value { font-size: 1.2rem; font-weight: bold; color: var(--accent); margin-top: 5px; }
+    .pulse { animation: pulseAnim 0.5s ease-out; }
+    @keyframes pulseAnim { 0% { color: #fff; transform: scale(1.1); } 100% { color: var(--accent); transform: scale(1); } }
   </style>
 </head>
 <body>
 
   <div class="card">
     <h1>🤖 Robot Host Bridge</h1>
-    <p>Run this on the Chromebook plugged into the Arduino.</p>
+    <p style="color: #888; font-size: 0.9rem; margin-top:-10px;">Chromebook Receiver</p>
     
     <button id="btnSerial">1. Connect Arduino (USB)</button>
     <button id="btnMqtt" disabled>2. Connect to Cloud</button>
 
     <div class="log-box" id="logBox">Waiting for setup...</div>
+
+    <!-- Live Data Display -->
+    <div class="dashboard">
+      <div class="metric-card"><div class="metric-label">X Pos</div><div id="m_x" class="metric-value">0</div></div>
+      <div class="metric-card"><div class="metric-label">Y Pos</div><div id="m_y" class="metric-value">0</div></div>
+      <div class="metric-card"><div class="metric-label">Yaw</div><div id="m_yaw" class="metric-value">0°</div></div>
+      <div class="metric-card"><div class="metric-label">Pitch</div><div id="m_pitch" class="metric-value">0°</div></div>
+      <div class="metric-card"><div class="metric-label">Roll</div><div id="m_roll" class="metric-value">0°</div></div>
+      <div class="metric-card"><div class="metric-label">Mouth</div><div id="m_mouth" class="metric-value">0%</div></div>
+      <div class="metric-card"><div class="metric-label">Smile</div><div id="m_smile" class="metric-value">0%</div></div>
+      <div class="metric-card"><div class="metric-label">L Eye</div><div id="m_leye" class="metric-value">0%</div></div>
+      <div class="metric-card"><div class="metric-label">R Eye</div><div id="m_reye" class="metric-value">0%</div></div>
+    </div>
   </div>
 
   <script>
     // --- SECURE MQTT SETUP ---
     const MQTT_BROKER = "broker.hivemq.com";
-    const MQTT_PORT = 8884; // Secure WSS port
-    const MQTT_TOPIC = "D-1DW";
+    const MQTT_PORT = 8884; 
+    const MQTT_TOPIC = "D-1DW"; // Must match index.html
     
     let serialPort, writer;
     let mqttClient;
@@ -42,9 +63,26 @@
     const btnMqtt = document.getElementById("btnMqtt");
     const logBox = document.getElementById("logBox");
 
+    // UI Elements for Live Data
+    const UI = {
+      x: document.getElementById("m_x"), y: document.getElementById("m_y"),
+      yaw: document.getElementById("m_yaw"), pitch: document.getElementById("m_pitch"), roll: document.getElementById("m_roll"),
+      mouth: document.getElementById("m_mouth"), smile: document.getElementById("m_smile"),
+      leye: document.getElementById("m_leye"), reye: document.getElementById("m_reye")
+    };
+
     function log(message) {
       logBox.innerHTML += `<div>> ${message}</div>`;
       logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    // Trigger CSS animation on incoming data
+    function triggerPulse() {
+      for (let key in UI) {
+        UI[key].classList.remove('pulse');
+        void UI[key].offsetWidth; // trigger reflow
+        UI[key].classList.add('pulse');
+      }
     }
 
     // --- 1. WEB SERIAL SETUP ---
@@ -60,7 +98,7 @@
         btnSerial.innerText = "Arduino Connected ✓";
         btnSerial.style.background = "var(--success)";
         btnSerial.disabled = true;
-        btnMqtt.disabled = false; // Enable step 2
+        btnMqtt.disabled = false; 
       } catch (err) {
         log("Error connecting to Arduino: " + err);
       }
@@ -75,18 +113,35 @@
 
       mqttClient.onConnectionLost = (res) => log("Cloud Disconnected! Code: " + res.errorCode);
       
-      // When a message arrives from the internet...
+      // --- WHEN A MESSAGE ARRIVES FROM THE CAMERA ---
       mqttClient.onMessageArrived = (message) => {
         const payload = message.payloadString;
         
-        // Send it directly to the Arduino!
+        // 1. Update the Live Dashboard!
+        // Split the CSV string (e.g. "10,20,5,-5,0,50,0,100,100") into an array
+        const dataParts = payload.trim().split(','); 
+        
+        if (dataParts.length >= 9) {
+          UI.x.innerText = dataParts[0];
+          UI.y.innerText = dataParts[1];
+          UI.yaw.innerText = dataParts[2] + "°";
+          UI.pitch.innerText = dataParts[3] + "°";
+          UI.roll.innerText = dataParts[4] + "°";
+          UI.mouth.innerText = dataParts[5] + "%";
+          UI.smile.innerText = dataParts[6] + "%";
+          UI.leye.innerText = dataParts[7] + "%";
+          UI.reye.innerText = dataParts[8] + "%";
+          triggerPulse(); // Make the text blink slightly to show it's updating
+        }
+
+        // 2. Send it directly to the Arduino!
         if (writer) {
           writer.write(payload);
         }
       };
 
       mqttClient.connect({
-        useSSL: true, // Forces wss:// for HTTPS compatibility
+        useSSL: true, 
         onSuccess: () => {
           log("Connected securely to Cloud! Listening for face data...");
           mqttClient.subscribe(MQTT_TOPIC);
