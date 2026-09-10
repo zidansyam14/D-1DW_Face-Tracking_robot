@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Remote Face Telemetry Dashboard</title>
+  <!-- Load MQTT Library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.1.0/paho-mqtt.min.js"></script>
+  <style>
+    :root { --bg: #121214; --card: #1e1e24; --accent: #00e5ff; --success: #00e676; --danger: #ff5252; --text: #ffffff; }
+    body { font-family: 'Segoe UI', Roboto, sans-serif; background-color: var(--bg); color: var(--text); margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+    h1 { margin-bottom: 5px; font-size: 1.8rem; }
+    p.subtitle { color: #888; margin-top: 0; margin-bottom: 20px; }
+    .controls { display: flex; gap: 15px; align-items: center; margin-bottom: 20px; }
+    button { background: var(--accent); color: #000; border: none; padding: 12px 24px; font-weight: bold; border-radius: 6px; cursor: pointer; font-size: 1rem; transition: 0.2s; }
+    button.connected { background: var(--danger); color: #fff; }
+    .status-badge { padding: 8px 16px; border-radius: 20px; font-size: 0.9rem; font-weight: bold; background: #2a3b4c; color: var(--accent); }
+    .status-badge.active { background: #1b4d2e; color: var(--success); }
+    .layout { display: flex; gap: 20px; max-width: 1200px; width: 100%; justify-content: center; flex-wrap: wrap; }
+    .view-container { position: relative; width: 640px; height: 480px; border-radius: 12px; overflow: hidden; background: #000; }
+    video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); }
+    .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: 400px; }
+    .metric-card { background: var(--card); padding: 12px; border-radius: 8px; text-align: center; }
+    .metric-label { font-size: 0.75rem; color: #aaa; text-transform: uppercase; }
+    .metric-value { font-size: 1.2rem; font-weight: bold; color: var(--accent); margin-top: 5px; }
+  </style>
+</head>
+<body>
+
+  <h1>Remote Face Telemetry</h1>
+  <p class="subtitle">Client to Cloud (MQTT) • Remote Control</p>
+
+  <div class="controls">
+    <button id="connectBtn">Connect to Cloud Server</button>
+    <span id="statusBadge" class="status-badge">Status: Offline</span>
+  </div>
+
+  <div class="layout">
+    <div class="view-container">
+      <video id="webcam" autoplay playsinline></video>
+      <canvas id="output_canvas" width="640" height="480"></canvas>
+    </div>
+
+    <div class="dashboard">
+      <div class="metric-card"><div class="metric-label">Visible</div><div id="m_vis" class="metric-value">No</div></div>
+      <div class="metric-card"><div class="metric-label">X Pos</div><div id="m_x" class="metric-value">0</div></div>
+      <div class="metric-card"><div class="metric-label">Y Pos</div><div id="m_y" class="metric-value">0</div></div>
+      <div class="metric-card"><div class="metric-label">Yaw</div><div id="m_yaw" class="metric-value">0°</div></div>
+      <div class="metric-card"><div class="metric-label">Pitch</div><div id="m_pitch" class="metric-value">0°</div></div>
+      <div class="metric-card"><div class="metric-label">Roll</div><div id="m_roll" class="metric-value">0°</div></div>
+      <div class="metric-card"><div class="metric-label">Distance</div><div id="m_dist" class="metric-value">0</div></div>
+      <div class="metric-card"><div class="metric-label">L Eye</div><div id="m_leye" class="metric-value">0%</div></div>
+      <div class="metric-card"><div class="metric-label">R Eye</div><div id="m_reye" class="metric-value">0%</div></div>
+      <div class="metric-card"><div class="metric-label">Mouth</div><div id="m_mouth" class="metric-value">0%</div></div>
+      <div class="metric-card"><div class="metric-label">Smile</div><div id="m_smile" class="metric-value">0%</div></div>
+      <div class="metric-card"><div class="metric-label">Mesh Pts</div><div id="m_pts" class="metric-value">0</div></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/+esm";
+
+    // --- MQTT SETUP ---
+    const MQTT_BROKER = "broker.hivemq.com";
+    const MQTT_PORT = 8000; // WebSocket port for HiveMQ
+    const MQTT_TOPIC = "D1DW_"; // CHANGE THIS TO SOMETHING UNIQUE!
+    
+    let mqttClient;
+    let isConnected = false;
+    let lastSendTime = 0;
+
+    const connectBtn = document.getElementById("connectBtn");
+    const statusBadge = document.getElementById("statusBadge");
+
+    connectBtn.addEventListener("click", () => {
+      if (!isConnected) {
+        connectBtn.innerText = "Connecting...";
+        const clientId = "client_" + Math.random().toString(16).substr(2, 8);
+        mqttClient = new Paho.MQTT.Client(MQTT_BROKER, MQTT_PORT, clientId);
+        
+        mqttClient.onConnectionLost = (responseObject) => {
+          isConnected = false;
+          connectBtn.innerText = "Connect to Cloud Server";
+          connectBtn.classList.remove("connected");
+          statusBadge.innerText = "Status: Offline";
+          statusBadge.className = "status-badge";
+        };
+
+        mqttClient.connect({
+          onSuccess: () => {
+            isConnected = true;
+            connectBtn.innerText = "Disconnect";
+            connectBtn.classList.add("connected");
+            statusBadge.innerText = "Status: Transmitting Online";
+            statusBadge.className = "status-badge active";
+          }
+        });
+      } else {
+        mqttClient.disconnect();
+      }
+    });
+
+    // --- FACE TRACKING SETUP ---
+    let faceLandmarker;
+    const video = document.getElementById("webcam");
+    const canvas = document.getElementById("output_canvas");
+    const ctx = canvas.getContext("2d");
+    
+    const UI = {
+      vis: document.getElementById("m_vis"), x: document.getElementById("m_x"), y: document.getElementById("m_y"),
+      yaw: document.getElementById("m_yaw"), pitch: document.getElementById("m_pitch"), roll: document.getElementById("m_roll"),
+      dist: document.getElementById("m_dist"), leye: document.getElementById("m_leye"), reye: document.getElementById("m_reye"),
+      mouth: document.getElementById("m_mouth"), smile: document.getElementById("m_smile"), pts: document.getElementById("m_pts")
+    };
+
+    async function initTracking() {
+      const filesetResolver = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm");
+      faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
+        baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task", delegate: "GPU" },
+        runningMode: "VIDEO", numFaces: 1, outputFaceBlendshapes: true
+      });
+      navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
+        .then(stream => { video.srcObject = stream; video.addEventListener("loadeddata", predictWebcam); });
+    }
+
+    let lastVideoTime = -1;
+    async function predictWebcam() {
+      if (video.currentTime !== lastVideoTime) {
+        lastVideoTime = video.currentTime;
+        let results = faceLandmarker.detectForVideo(video, performance.now());
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        if (results.faceLandmarks && results.faceLandmarks.length > 0) {
+          const landmarks = results.faceLandmarks[0];
+          const shapes = results.faceBlendshapes[0].categories;
+          const getShape = (name) => shapes.find(s => s.categoryName === name)?.score || 0;
+
+          ctx.fillStyle = "rgba(0, 229, 255, 0.4)";
+          for (let pt of landmarks) ctx.fillRect(pt.x * canvas.width, pt.y * canvas.height, 2, 2);
+          
+          UI.pts.innerText = landmarks.length; UI.vis.innerText = "Yes"; UI.vis.style.color = "#00e676";
+
+          let xPos = Math.round((landmarks[1].x - 0.5) * 200); 
+          let yPos = Math.round((landmarks[1].y - 0.5) * -200); 
+          let faceWidth = landmarks[454].x - landmarks[234].x;
+          
+          let dx = landmarks[263].x - landmarks[33].x, dy = landmarks[263].y - landmarks[33].y;
+          let roll = Math.round(Math.atan2(dy, dx) * (180 / Math.PI));
+          let yaw = Math.round((((landmarks[1].x - landmarks[234].x) - (landmarks[454].x - landmarks[1].x)) / faceWidth) * 100);
+          let pitch = Math.round((((landmarks[1].y - landmarks[10].y) - (landmarks[152].y - landmarks[1].y)) / (landmarks[152].y - landmarks[10].y)) * 100);
+
+          let mouthGap = Math.round(getShape("jawOpen") * 100);
+          let smile = Math.round(Math.max(getShape("mouthSmileLeft"), getShape("mouthSmileRight")) * 100);
+          let leftEye = Math.round((1 - getShape("eyeBlinkLeft")) * 100); 
+          let rightEye = Math.round((1 - getShape("eyeBlinkRight")) * 100);
+
+          UI.x.innerText = xPos; UI.y.innerText = yPos; UI.dist.innerText = Math.round(faceWidth * 200);
+          UI.yaw.innerText = yaw + "°"; UI.pitch.innerText = pitch + "°"; UI.roll.innerText = roll + "°";
+          UI.mouth.innerText = mouthGap + "%"; UI.smile.innerText = smile + "%";
+          UI.leye.innerText = leftEye + "%"; UI.reye.innerText = rightEye + "%";
+
+          // SEND OVER MQTT
+          if (isConnected && (performance.now() - lastSendTime > 50)) {
+            lastSendTime = performance.now();
+            const payload = `${xPos},${yPos},${yaw},${pitch},${roll},${mouthGap},${smile},${leftEye},${rightEye}\n`;
+            const message = new Paho.MQTT.Message(payload);
+            message.destinationName = MQTT_TOPIC;
+            mqttClient.send(message);
+          }
+        } else {
+          UI.vis.innerText = "No"; UI.vis.style.color = "#ff5252";
+        }
+      }
+      requestAnimationFrame(predictWebcam);
+    }
+
+    initTracking();
+  </script>
+</body>
+</html>

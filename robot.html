@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Robot Host (MQTT to Serial Bridge)</title>
+  <!-- Load MQTT Library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.1.0/paho-mqtt.min.js"></script>
+  <style>
+    :root { --bg: #121214; --card: #1e1e24; --accent: #00e5ff; --success: #00e676; --text: #ffffff; }
+    body { font-family: 'Segoe UI', Roboto, sans-serif; background-color: var(--bg); color: var(--text); padding: 40px; display: flex; flex-direction: column; align-items: center; text-align: center; }
+    .card { background: var(--card); padding: 30px; border-radius: 12px; width: 100%; max-width: 500px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+    h1 { margin-top: 0; color: var(--accent); }
+    button { background: var(--accent); color: #000; border: none; padding: 15px; width: 100%; font-weight: bold; border-radius: 6px; cursor: pointer; font-size: 1.1rem; margin-bottom: 15px; transition: 0.2s; }
+    button:hover { opacity: 0.9; }
+    button:disabled { background: #555; color: #888; cursor: not-allowed; }
+    .log-box { background: #000; color: #00e676; font-family: monospace; padding: 15px; border-radius: 6px; height: 150px; overflow-y: auto; text-align: left; margin-top: 20px; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+
+  <div class="card">
+    <h1>🤖 Robot Host Bridge</h1>
+    <p>Run this on the Chromebook plugged into the Arduino.</p>
+    
+    <button id="btnSerial">1. Connect Arduino (USB)</button>
+    <button id="btnMqtt" disabled>2. Connect to Cloud</button>
+
+    <div class="log-box" id="logBox">Waiting for setup...</div>
+  </div>
+
+  <script>
+    // --- CONFIGURATION ---
+    const MQTT_BROKER = "broker.hivemq.com";
+    const MQTT_PORT = 8000;
+    const MQTT_TOPIC = "D1DW_"; // MUST MATCH INDEX.HTML
+    
+    let serialPort, writer;
+    let mqttClient;
+
+    const btnSerial = document.getElementById("btnSerial");
+    const btnMqtt = document.getElementById("btnMqtt");
+    const logBox = document.getElementById("logBox");
+
+    function log(message) {
+      logBox.innerHTML += `<div>> ${message}</div>`;
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    // --- 1. WEB SERIAL SETUP ---
+    btnSerial.addEventListener("click", async () => {
+      try {
+        serialPort = await navigator.serial.requestPort();
+        await serialPort.open({ baudRate: 115200 });
+        const textEncoder = new TextEncoderStream();
+        textEncoder.readable.pipeTo(serialPort.writable);
+        writer = textEncoder.writable.getWriter();
+        
+        log("Arduino Connected Successfully!");
+        btnSerial.innerText = "Arduino Connected ✓";
+        btnSerial.style.background = "var(--success)";
+        btnSerial.disabled = true;
+        btnMqtt.disabled = false; // Enable step 2
+      } catch (err) {
+        log("Error connecting to Arduino: " + err);
+      }
+    });
+
+    // --- 2. MQTT SETUP ---
+    btnMqtt.addEventListener("click", () => {
+      btnMqtt.innerText = "Connecting to Cloud...";
+      const clientId = "host_" + Math.random().toString(16).substr(2, 8);
+      mqttClient = new Paho.MQTT.Client(MQTT_BROKER, MQTT_PORT, clientId);
+
+      mqttClient.onConnectionLost = (res) => log("Cloud Disconnected! Code: " + res.errorCode);
+      
+      // When a message arrives from the internet...
+      mqttClient.onMessageArrived = (message) => {
+        const payload = message.payloadString;
+        
+        // Send it directly to the Arduino!
+        if (writer) {
+          writer.write(payload);
+        }
+      };
+
+      mqttClient.connect({
+        onSuccess: () => {
+          log("Connected to Cloud! Listening for face data...");
+          mqttClient.subscribe(MQTT_TOPIC);
+          btnMqtt.innerText = "Listening for remote commands ✓";
+          btnMqtt.style.background = "var(--success)";
+          btnMqtt.disabled = true;
+        },
+        onFailure: (err) => log("MQTT Error: " + err.errorMessage)
+      });
+    });
+  </script>
+</body>
+</html>
