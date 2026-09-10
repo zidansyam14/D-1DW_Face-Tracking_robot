@@ -13,7 +13,9 @@
     h1 { margin-top: 0; color: var(--accent); font-size: 1.5rem; }
     button { background: var(--accent); color: #000; border: none; padding: 15px; width: 100%; font-weight: bold; border-radius: 6px; cursor: pointer; font-size: 1.1rem; margin-bottom: 15px; transition: 0.2s; }
     button:hover { opacity: 0.9; }
-    button:disabled { background: #555; color: #888; cursor: not-allowed; }
+    button.optional { background: #3a3a45; color: #fff; border: 1px solid var(--accent); }
+    button.optional:hover { background: var(--accent); color: #000; }
+    button:disabled { background: #555 !important; color: #888 !important; cursor: not-allowed; border: none; }
     .log-box { background: #000; color: #00e676; font-family: monospace; padding: 15px; border-radius: 6px; height: 100px; overflow-y: auto; text-align: left; margin-top: 15px; font-size: 0.85rem; }
     
     /* Live Dashboard Styles */
@@ -31,8 +33,9 @@
     <h1>🤖 Robot Host Bridge</h1>
     <p style="color: #888; font-size: 0.9rem; margin-top:-10px;">Chromebook Receiver</p>
     
-    <button id="btnSerial">1. Connect Arduino (USB)</button>
-    <button id="btnMqtt" disabled>2. Connect to Cloud</button>
+    <!-- Buttons are swapped and unlocked -->
+    <button id="btnMqtt">1. Connect to Cloud (Start Here)</button>
+    <button id="btnSerial" class="optional">2. Connect Arduino (Optional)</button>
 
     <div class="log-box" id="logBox">Waiting for setup...</div>
 
@@ -85,40 +88,25 @@
       }
     }
 
-    // --- 1. WEB SERIAL SETUP ---
-    btnSerial.addEventListener("click", async () => {
-      try {
-        serialPort = await navigator.serial.requestPort();
-        await serialPort.open({ baudRate: 115200 });
-        const textEncoder = new TextEncoderStream();
-        textEncoder.readable.pipeTo(serialPort.writable);
-        writer = textEncoder.writable.getWriter();
-        
-        log("Arduino Connected Successfully!");
-        btnSerial.innerText = "Arduino Connected ✓";
-        btnSerial.style.background = "var(--success)";
-        btnSerial.disabled = true;
-        btnMqtt.disabled = false; 
-      } catch (err) {
-        log("Error connecting to Arduino: " + err);
-      }
-    });
-
-    // --- 2. MQTT SETUP ---
+    // --- 1. MQTT SETUP (Now completely independent) ---
     btnMqtt.addEventListener("click", () => {
       btnMqtt.innerText = "Connecting to Cloud...";
       const clientId = "host_" + Math.random().toString(16).substr(2, 8);
       
       mqttClient = new Paho.MQTT.Client(MQTT_BROKER, MQTT_PORT, clientId);
 
-      mqttClient.onConnectionLost = (res) => log("Cloud Disconnected! Code: " + res.errorCode);
+      mqttClient.onConnectionLost = (res) => {
+        log("Cloud Disconnected! Code: " + res.errorCode);
+        btnMqtt.innerText = "1. Connect to Cloud (Start Here)";
+        btnMqtt.style.background = "var(--accent)";
+        btnMqtt.disabled = false;
+      };
       
       // --- WHEN A MESSAGE ARRIVES FROM THE CAMERA ---
       mqttClient.onMessageArrived = (message) => {
         const payload = message.payloadString;
         
         // 1. Update the Live Dashboard!
-        // Split the CSV string (e.g. "10,20,5,-5,0,50,0,100,100") into an array
         const dataParts = payload.trim().split(','); 
         
         if (dataParts.length >= 9) {
@@ -131,26 +119,48 @@
           UI.smile.innerText = dataParts[6] + "%";
           UI.leye.innerText = dataParts[7] + "%";
           UI.reye.innerText = dataParts[8] + "%";
-          triggerPulse(); // Make the text blink slightly to show it's updating
+          triggerPulse(); // Flash the numbers
         }
 
-        // 2. Send it directly to the Arduino!
+        // 2. Send it to the Arduino ONLY if it's connected
         if (writer) {
-          writer.write(payload);
+          writer.write(payload + "\n"); // Added \n just to be safe for Arduino Serial parsing
         }
       };
 
       mqttClient.connect({
         useSSL: true, 
         onSuccess: () => {
-          log("Connected securely to Cloud! Listening for face data...");
+          log("Connected securely to Cloud! Waiting for face data...");
           mqttClient.subscribe(MQTT_TOPIC);
-          btnMqtt.innerText = "Listening for remote commands ✓";
+          btnMqtt.innerText = "Cloud Connected ✓";
           btnMqtt.style.background = "var(--success)";
           btnMqtt.disabled = true;
         },
-        onFailure: (err) => log("MQTT Error: " + err.errorMessage)
+        onFailure: (err) => {
+          log("MQTT Error: " + err.errorMessage);
+          btnMqtt.innerText = "1. Connect to Cloud (Start Here)";
+        }
       });
+    });
+
+    // --- 2. WEB SERIAL SETUP (Now completely optional) ---
+    btnSerial.addEventListener("click", async () => {
+      try {
+        serialPort = await navigator.serial.requestPort();
+        await serialPort.open({ baudRate: 115200 });
+        const textEncoder = new TextEncoderStream();
+        textEncoder.readable.pipeTo(serialPort.writable);
+        writer = textEncoder.writable.getWriter();
+        
+        log("Arduino Connected Successfully!");
+        btnSerial.innerText = "Arduino Connected ✓";
+        btnSerial.style.background = "var(--success)";
+        btnSerial.style.color = "#000";
+        btnSerial.disabled = true;
+      } catch (err) {
+        log("Error connecting to Arduino: " + err);
+      }
     });
   </script>
 </body>
