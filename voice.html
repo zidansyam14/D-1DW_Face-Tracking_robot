@@ -148,7 +148,12 @@
     const eyeLeft = document.getElementById("eyeLeft");
     const eyeRight = document.getElementById("eyeRight");
 
-    if(localStorage.getItem("gemini_key")) apiKeyInput.value = localStorage.getItem("gemini_key");
+    if(localStorage.getItem("gemini_key")) {
+      apiKeyInput.value = localStorage.getItem("gemini_key");
+    } else {
+  // ets the default key on first load
+      apiKeyInput.value = "AQ.Ab8RN6KV1hdbYkJ6XHoAjbI6Ww9GgQ6hi3LikLwdAreD4s0gPg";
+    }
     apiKeyInput.addEventListener("change", () => localStorage.setItem("gemini_key", apiKeyInput.value));
     
     document.getElementById("pitchRate").addEventListener("input", (e) => document.getElementById("pitchVal").innerText = e.target.value);
@@ -163,7 +168,7 @@
         option.setAttribute('data-name', voice.name);
         voiceSelect.appendChild(option);
       });
-      const bestVoiceIndex = voices.findIndex(v => v.name.includes("Google") || v.name.includes("Zira"));
+      const bestVoiceIndex = voices.findIndex(v => v.lang.startsWith("en-") || v.name.includes("English"));
       if(bestVoiceIndex !== -1) voiceSelect.selectedIndex = bestVoiceIndex;
     }
     populateVoiceList();
