@@ -11,7 +11,6 @@
     .card { background: var(--card); padding: 30px; border-radius: 12px; width: 100%; max-width: 500px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); box-sizing: border-box; }
     h1 { margin-top: 0; color: var(--accent); font-size: 1.8rem; margin-bottom: 5px; }
     
-    /* --- NEW: Interactive Robot Face styling (Inspired by LOFI) --- */
     .robot-face-container {
       width: 160px;
       height: 140px;
@@ -38,9 +37,8 @@
       background: var(--accent);
       border-radius: 10px;
       box-shadow: 0 0 10px var(--accent);
-      transition: height 0.05s ease-in-out; /* Fast transition for talking animation */
+      transition: height 0.05s ease-in-out;
     }
-    /* ----------------------------------------------------------- */
 
     .settings-box { background: #121214; border: 1px solid #333; padding: 15px; border-radius: 8px; margin-bottom: 15px; text-align: left; }
     .settings-box label { font-size: 0.85rem; color: #aaa; margin-bottom: 5px; display: block; margin-top: 10px; }
@@ -81,7 +79,6 @@
     <h1>🤖 Gemini AI Robot</h1>
     <span id="statusBadge" class="status-badge">Status: Offline</span>
 
-    <!-- The interactive visual face -->
     <div class="robot-face-container">
       <div class="eyes">
         <div class="eye" id="eyeLeft"></div>
@@ -147,7 +144,6 @@
     const textInput = document.getElementById("textInput");
     const btnSend = document.getElementById("btnSend");
     
-    // UI Elements for Face
     const robotMouth = document.getElementById("robotMouth");
     const eyeLeft = document.getElementById("eyeLeft");
     const eyeRight = document.getElementById("eyeRight");
@@ -158,7 +154,6 @@
     document.getElementById("pitchRate").addEventListener("input", (e) => document.getElementById("pitchVal").innerText = e.target.value);
     document.getElementById("speedRate").addEventListener("input", (e) => document.getElementById("speedVal").innerText = e.target.value);
 
-    // Load available voices
     function populateVoiceList() {
       voices = window.speechSynthesis.getVoices();
       voiceSelect.innerHTML = '';
@@ -168,14 +163,12 @@
         option.setAttribute('data-name', voice.name);
         voiceSelect.appendChild(option);
       });
-      // Prefer Google voices for Chromebooks
       const bestVoiceIndex = voices.findIndex(v => v.name.includes("Google") || v.name.includes("Zira"));
       if(bestVoiceIndex !== -1) voiceSelect.selectedIndex = bestVoiceIndex;
     }
     populateVoiceList();
     if (speechSynthesis.onvoiceschanged !== undefined) speechSynthesis.onvoiceschanged = populateVoiceList;
 
-    // --- 1. MQTT SETUP ---
     btnConnect.addEventListener("click", () => {
       if (!isConnected) {
         btnConnect.innerText = "Connecting...";
@@ -209,7 +202,6 @@
       }
     });
 
-    // --- Face Emotions ---
     function setFaceEmotion(state) {
       if(state === "listening") {
         eyeLeft.style.height = "35px"; eyeRight.style.height = "35px";
@@ -226,7 +218,6 @@
       }
     }
 
-    // --- 2. SPEECH RECOGNITION ---
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     let recognition;
     if (SpeechRecognition) {
@@ -259,7 +250,7 @@
       if(textInput.value.trim() !== "") { handleUserInput(textInput.value); textInput.value = ""; }
     });
 
-    // --- 3. GEMINI AI LOGIC ---
+    // --- GEMINI AI LOGIC WITH AUTOMATIC MODEL FALLBACK ---
     async function handleUserInput(userText) {
       addChat("You", userText, "user");
       const apiKey = apiKeyInput.value.trim();
@@ -268,28 +259,45 @@
       addChat("System", "Robot is thinking...", "system");
       setFaceEmotion("thinking");
 
-      try {
-        const prompt = `You are a physical robot. Speak naturally, funny, and like a human. Keep answers strictly under 2 sentences. The user says: "${userText}"`;
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-        });
-        const data = await response.json();
-        
-        chatBox.removeChild(chatBox.lastChild); // Remove thinking msg
-        if (data.error) { addChat("System", "API Error: " + data.error.message, "system"); setFaceEmotion("online"); return; }
+      const prompt = `You are a physical robot. Speak naturally, funny, and like a human. Keep answers strictly under 2 sentences. The user says: "${userText}"`;
 
-        const aiReply = data.candidates[0].content.parts[0].text;
+      // Candidate models list: automatically tries active endpoint
+      const candidateModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-flash"];
+      let aiReply = null;
+      let lastErrorMessage = "";
+
+      for (const model of candidateModels) {
+        try {
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+          });
+          
+          const data = await response.json();
+          if (!data.error && data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
+            aiReply = data.candidates[0].content.parts[0].text;
+            break; // Stop loop as soon as a working model responds
+          } else if (data.error) {
+            lastErrorMessage = data.error.message;
+          }
+        } catch (e) {
+          lastErrorMessage = e.message;
+        }
+      }
+
+      chatBox.removeChild(chatBox.lastChild); // Remove thinking message
+
+      if (aiReply) {
         addChat("Robot", aiReply, "robot");
         setFaceEmotion("online");
         speakAndAnimateMouth(aiReply);
-      } catch (error) {
-        addChat("System", "Error connecting to AI.", "system");
+      } else {
+        addChat("System", "API Error: " + (lastErrorMessage || "Unable to reach Gemini models"), "system");
         setFaceEmotion("online");
       }
     }
 
-    // --- 4. ANIMATION & SOUND SYNC ---
     function speakAndAnimateMouth(text) {
       if (!('speechSynthesis' in window)) return;
       window.speechSynthesis.cancel(); 
@@ -303,22 +311,17 @@
       utterance.onstart = () => {
         clearInterval(mouthInterval);
         mouthInterval = setInterval(() => {
-          // Generate a random mouth opening (20 to 80)
           const randomMouth = Math.floor(Math.random() * 60) + 20;
-          
-          // Send to Arduino Servo
           sendMQTTData(randomMouth);
-          
-          // Animate the face ON SCREEN so you can see it talking
           robotMouth.style.height = (randomMouth / 1.5) + "px"; 
           robotMouth.style.borderRadius = "20px";
-        }, 80); // Updates every 80ms for smooth flutter
+        }, 80);
       };
 
       utterance.onend = () => {
         clearInterval(mouthInterval);
-        sendMQTTData(0); // Close Arduino mouth
-        robotMouth.style.height = "6px"; // Close on-screen mouth
+        sendMQTTData(0);
+        robotMouth.style.height = "6px";
         robotMouth.style.borderRadius = "10px";
       };
 
