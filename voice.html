@@ -3,27 +3,68 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Talking Robot Mode</title>
-  <!-- Load Stable Paho MQTT Library -->
+  <title>Gemini AI Talking Robot</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js" type="text/javascript"></script>
   <style>
-    :root { --bg: #121214; --card: #1e1e24; --accent: #00e5ff; --success: #00e676; --danger: #ff5252; --text: #ffffff; }
+    :root { --bg: #121214; --card: #1e1e24; --accent: #00e5ff; --success: #00e676; --danger: #ff5252; --warning: #ffd600; --text: #ffffff; }
     body { font-family: 'Segoe UI', Roboto, sans-serif; background-color: var(--bg); color: var(--text); padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 90vh; margin: 0; text-align: center; }
     .card { background: var(--card); padding: 30px; border-radius: 12px; width: 100%; max-width: 500px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); box-sizing: border-box; }
-    h1 { margin-top: 0; color: var(--accent); font-size: 1.8rem; }
-    .controls { display: flex; flex-direction: column; gap: 12px; margin-top: 15px; }
+    h1 { margin-top: 0; color: var(--accent); font-size: 1.8rem; margin-bottom: 5px; }
+    
+    /* --- NEW: Interactive Robot Face styling (Inspired by LOFI) --- */
+    .robot-face-container {
+      width: 160px;
+      height: 140px;
+      background: #111;
+      border: 4px solid var(--accent);
+      border-radius: 20px;
+      margin: 15px auto;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 20px rgba(0, 229, 255, 0.2);
+    }
+    .eyes { display: flex; gap: 35px; margin-bottom: 25px; }
+    .eye { 
+      width: 25px; height: 25px; 
+      background: var(--accent); 
+      border-radius: 50%; 
+      box-shadow: 0 0 15px var(--accent); 
+      transition: 0.3s;
+    }
+    .mouth {
+      width: 70px; height: 6px;
+      background: var(--accent);
+      border-radius: 10px;
+      box-shadow: 0 0 10px var(--accent);
+      transition: height 0.05s ease-in-out; /* Fast transition for talking animation */
+    }
+    /* ----------------------------------------------------------- */
+
+    .settings-box { background: #121214; border: 1px solid #333; padding: 15px; border-radius: 8px; margin-bottom: 15px; text-align: left; }
+    .settings-box label { font-size: 0.85rem; color: #aaa; margin-bottom: 5px; display: block; margin-top: 10px; }
+    .settings-box label:first-child { margin-top: 0; }
+    .settings-box input[type="password"], .settings-box select, .settings-box input[type="range"] { width: 100%; background: #000; border: 1px solid #555; color: #fff; padding: 10px; border-radius: 4px; box-sizing: border-box; outline: none; font-family: inherit; }
+    .settings-box input:focus, .settings-box select:focus { border-color: var(--accent); }
+    
+    .slider-row { display: flex; gap: 15px; }
+    .slider-container { flex: 1; }
+
+    .controls { display: flex; flex-direction: column; gap: 12px; }
     button { background: var(--accent); color: #000; border: none; padding: 14px; font-weight: bold; border-radius: 6px; cursor: pointer; font-size: 1rem; transition: 0.2s; }
-    button:hover { opacity: 0.9; }
+    button:hover { opacity: 0.9; transform: scale(1.02); }
     button.active { background: var(--danger); color: #fff; }
-    button:disabled { background: #555; color: #888; cursor: not-allowed; }
-    .status-badge { padding: 8px 16px; border-radius: 20px; font-size: 0.85rem; font-weight: bold; background: #2a3b4c; color: var(--accent); display: inline-block; margin-bottom: 10px; }
+    button:disabled { background: #555; color: #888; cursor: not-allowed; transform: scale(1); }
+    
+    .status-badge { padding: 8px 16px; border-radius: 20px; font-size: 0.85rem; font-weight: bold; background: #2a3b4c; color: var(--accent); display: inline-block; margin-bottom: 15px; }
     .status-badge.active { background: #1b4d2e; color: var(--success); }
     
-    /* Log and Chat Styles */
-    .chat-box { background: #000; padding: 15px; border-radius: 6px; height: 220px; overflow-y: auto; text-align: left; font-size: 0.9rem; margin-top: 15px; border: 1px solid #333; display: flex; flex-direction: column; gap: 8px; }
+    .chat-box { background: #000; padding: 15px; border-radius: 6px; height: 160px; overflow-y: auto; text-align: left; font-size: 0.9rem; margin-top: 15px; border: 1px solid #333; display: flex; flex-direction: column; gap: 8px; }
     .msg { padding: 8px 12px; border-radius: 8px; max-width: 85%; word-wrap: break-word; line-height: 1.3; }
     .msg.user { color: #fff; background: #005b66; align-self: flex-end; }
     .msg.robot { color: #fff; background: #1b4d2e; align-self: flex-start; }
+    .msg.system { color: var(--warning); font-size: 0.8rem; align-self: center; background: none; }
     
     .chat-input-row { display: flex; gap: 8px; margin-top: 12px; }
     .chat-input-row input { flex: 1; background: #121214; border: 1px solid #333; color: #fff; padding: 12px; border-radius: 6px; font-size: 0.95rem; outline: none; }
@@ -37,23 +78,49 @@
 <body>
 
   <div class="card">
-    <h1>🗣️ Talking Robot</h1>
+    <h1>🤖 Gemini AI Robot</h1>
     <span id="statusBadge" class="status-badge">Status: Offline</span>
 
+    <!-- The interactive visual face -->
+    <div class="robot-face-container">
+      <div class="eyes">
+        <div class="eye" id="eyeLeft"></div>
+        <div class="eye" id="eyeRight"></div>
+      </div>
+      <div class="mouth" id="robotMouth"></div>
+    </div>
+
+    <div class="settings-box">
+      <label>Gemini API Key:</label>
+      <input type="password" id="apiKeyInput" placeholder="Paste API Key here...">
+      
+      <label>Robot Voice:</label>
+      <select id="voiceSelect"></select>
+      
+      <div class="slider-row">
+        <div class="slider-container">
+          <label>Pitch: <span id="pitchVal">1.0</span></label>
+          <input type="range" id="pitchRate" min="0" max="2" value="1" step="0.1">
+        </div>
+        <div class="slider-container">
+          <label>Speed: <span id="speedVal">1.0</span></label>
+          <input type="range" id="speedRate" min="0.5" max="2" value="1" step="0.1">
+        </div>
+      </div>
+    </div>
+
     <div class="controls">
-      <button id="btnConnect">1. Connect to Cloud Server</button>
+      <button id="btnConnect">1. Connect to Robot Body</button>
       <button id="btnTalk" disabled>2. Tap to Speak 🎙️</button>
     </div>
 
-    <!-- Live Talking Log -->
-    <div class="chat-box" id="chatBox">
-      <div class="msg robot">Robot: Connect to the cloud and talk or type to me!</div>
-    </div>
-
-    <!-- Text Chat Input -->
     <div class="chat-input-row">
       <input type="text" id="textInput" placeholder="Type a message..." disabled>
       <button id="btnSend" disabled>Send</button>
+    </div>
+
+    <div class="chat-box" id="chatBox">
+      <div class="msg robot">Robot: System initialized. Waiting for API Key and Connection.</div>
     </div>
 
     <a href="index.html" class="back-link">← Back to Hub</a>
@@ -67,47 +134,74 @@
     let mqttClient;
     let isConnected = false;
     let mouthInterval = null;
+    let voices = [];
 
+    const apiKeyInput = document.getElementById("apiKeyInput");
+    const voiceSelect = document.getElementById("voiceSelect");
+    const pitchRate = document.getElementById("pitchRate");
+    const speedRate = document.getElementById("speedRate");
     const btnConnect = document.getElementById("btnConnect");
     const btnTalk = document.getElementById("btnTalk");
     const statusBadge = document.getElementById("statusBadge");
     const chatBox = document.getElementById("chatBox");
     const textInput = document.getElementById("textInput");
     const btnSend = document.getElementById("btnSend");
+    
+    // UI Elements for Face
+    const robotMouth = document.getElementById("robotMouth");
+    const eyeLeft = document.getElementById("eyeLeft");
+    const eyeRight = document.getElementById("eyeRight");
+
+    if(localStorage.getItem("gemini_key")) apiKeyInput.value = localStorage.getItem("gemini_key");
+    apiKeyInput.addEventListener("change", () => localStorage.setItem("gemini_key", apiKeyInput.value));
+    
+    document.getElementById("pitchRate").addEventListener("input", (e) => document.getElementById("pitchVal").innerText = e.target.value);
+    document.getElementById("speedRate").addEventListener("input", (e) => document.getElementById("speedVal").innerText = e.target.value);
+
+    // Load available voices
+    function populateVoiceList() {
+      voices = window.speechSynthesis.getVoices();
+      voiceSelect.innerHTML = '';
+      voices.forEach((voice) => {
+        const option = document.createElement('option');
+        option.textContent = `${voice.name} (${voice.lang})`;
+        option.setAttribute('data-name', voice.name);
+        voiceSelect.appendChild(option);
+      });
+      // Prefer Google voices for Chromebooks
+      const bestVoiceIndex = voices.findIndex(v => v.name.includes("Google") || v.name.includes("Zira"));
+      if(bestVoiceIndex !== -1) voiceSelect.selectedIndex = bestVoiceIndex;
+    }
+    populateVoiceList();
+    if (speechSynthesis.onvoiceschanged !== undefined) speechSynthesis.onvoiceschanged = populateVoiceList;
 
     // --- 1. MQTT SETUP ---
     btnConnect.addEventListener("click", () => {
       if (!isConnected) {
         btnConnect.innerText = "Connecting...";
-        const clientId = "voice_" + Math.random().toString(16).substr(2, 8);
+        const clientId = "gemini_voice_" + Math.random().toString(16).substr(2, 8);
         mqttClient = new Paho.MQTT.Client(MQTT_BROKER, MQTT_PORT, clientId);
 
         mqttClient.onConnectionLost = () => {
           isConnected = false;
-          btnConnect.innerText = "1. Connect to Cloud Server";
+          btnConnect.innerText = "1. Connect to Robot Body";
           btnConnect.classList.remove("active");
           statusBadge.innerText = "Status: Offline";
           statusBadge.className = "status-badge";
-          btnTalk.disabled = true;
-          textInput.disabled = true;
-          btnSend.disabled = true;
+          btnTalk.disabled = true; textInput.disabled = true; btnSend.disabled = true;
+          setFaceEmotion("offline");
         };
 
         mqttClient.connect({
           useSSL: true,
           onSuccess: () => {
             isConnected = true;
-            btnConnect.innerText = "Disconnect Cloud";
+            btnConnect.innerText = "Disconnect Robot";
             btnConnect.classList.add("active");
             statusBadge.innerText = "Status: Online";
             statusBadge.className = "status-badge active";
-            btnTalk.disabled = false;
-            textInput.disabled = false;
-            btnSend.disabled = false;
-          },
-          onFailure: (err) => {
-            alert("Connection failed: " + err.errorMessage);
-            btnConnect.innerText = "1. Connect to Cloud Server";
+            btnTalk.disabled = false; textInput.disabled = false; btnSend.disabled = false;
+            setFaceEmotion("online");
           }
         });
       } else {
@@ -115,102 +209,122 @@
       }
     });
 
+    // --- Face Emotions ---
+    function setFaceEmotion(state) {
+      if(state === "listening") {
+        eyeLeft.style.height = "35px"; eyeRight.style.height = "35px";
+        eyeLeft.style.background = "var(--success)"; eyeRight.style.background = "var(--success)";
+      } else if (state === "thinking") {
+        eyeLeft.style.height = "10px"; eyeRight.style.height = "10px";
+        eyeLeft.style.background = "var(--warning)"; eyeRight.style.background = "var(--warning)";
+      } else if (state === "online") {
+        eyeLeft.style.height = "25px"; eyeRight.style.height = "25px";
+        eyeLeft.style.background = "var(--accent)"; eyeRight.style.background = "var(--accent)";
+      } else {
+        eyeLeft.style.height = "5px"; eyeRight.style.height = "5px";
+        eyeLeft.style.background = "#555"; eyeRight.style.background = "#555";
+      }
+    }
+
     // --- 2. SPEECH RECOGNITION ---
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     let recognition;
-
     if (SpeechRecognition) {
       recognition = new SpeechRecognition();
       recognition.continuous = false;
-      recognition.interimResults = false;
-
+      
       recognition.onstart = () => {
         btnTalk.innerText = "Listening... 🎧";
         btnTalk.style.background = "var(--success)";
+        setFaceEmotion("listening");
       };
-
-      recognition.onresult = (event) => {
-        const userText = event.results[0][0].transcript;
-        handleUserInput(userText);
-      };
-
-      recognition.onerror = () => { resetTalkBtn(); };
-      recognition.onend = () => { resetTalkBtn(); };
-
-      btnTalk.addEventListener("click", () => {
-        try { recognition.start(); } catch(e){}
-      });
+      
+      recognition.onresult = (event) => handleUserInput(event.results[0][0].transcript);
+      recognition.onerror = () => resetTalkBtn();
+      recognition.onend = () => resetTalkBtn();
+      
+      btnTalk.addEventListener("click", () => { try { recognition.start(); } catch(e){} });
     } else {
-      btnTalk.innerText = "Speech Recognition Not Supported";
+      btnTalk.innerText = "Speech Not Supported";
       btnTalk.disabled = true;
     }
 
     function resetTalkBtn() {
       btnTalk.innerText = "2. Tap to Speak 🎙️";
       btnTalk.style.background = "var(--accent)";
+      if(isConnected) setFaceEmotion("online");
     }
 
-    // --- 3. CHAT INPUT HANDLING ---
-    btnSend.addEventListener("click", sendTextMessage);
-    textInput.addEventListener("keypress", (e) => {
-      if (e.key === "Enter") sendTextMessage();
+    btnSend.addEventListener("click", () => {
+      if(textInput.value.trim() !== "") { handleUserInput(textInput.value); textInput.value = ""; }
     });
 
-    function sendTextMessage() {
-      const text = textInput.value.trim();
-      if (text !== "") {
-        handleUserInput(text);
-        textInput.value = "";
-      }
-    }
-
-    // --- 4. DIALOG LOGIC ---
-    function handleUserInput(userText) {
+    // --- 3. GEMINI AI LOGIC ---
+    async function handleUserInput(userText) {
       addChat("You", userText, "user");
-      
-      const lower = userText.toLowerCase();
-      let reply = "I heard you, but I am still learning how to answer that!";
+      const apiKey = apiKeyInput.value.trim();
+      if (!apiKey) { addChat("System", "Please enter your Gemini API Key first!", "system"); return; }
 
-      if (lower.includes("hello") || lower.includes("hi")) {
-        reply = "Hello there! Nice to meet you.";
-      } else if (lower.includes("name")) {
-        reply = "My name is LOFI Robot!";
-      } else if (lower.includes("how are you")) {
-        reply = "I am doing great, ready to talk!";
-      } else if (lower.includes("dance") || lower.includes("move")) {
-        reply = "I am opening my jaw and talking right now!";
-      } else if (lower.includes("bye")) {
-        reply = "Goodbye! Talk to you later.";
+      addChat("System", "Robot is thinking...", "system");
+      setFaceEmotion("thinking");
+
+      try {
+        const prompt = `You are a physical robot. Speak naturally, funny, and like a human. Keep answers strictly under 2 sentences. The user says: "${userText}"`;
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+        });
+        const data = await response.json();
+        
+        chatBox.removeChild(chatBox.lastChild); // Remove thinking msg
+        if (data.error) { addChat("System", "API Error: " + data.error.message, "system"); setFaceEmotion("online"); return; }
+
+        const aiReply = data.candidates[0].content.parts[0].text;
+        addChat("Robot", aiReply, "robot");
+        setFaceEmotion("online");
+        speakAndAnimateMouth(aiReply);
+      } catch (error) {
+        addChat("System", "Error connecting to AI.", "system");
+        setFaceEmotion("online");
       }
-
-      addChat("Robot", reply, "robot");
-      speakAndAnimateMouth(reply);
     }
 
-    // --- 5. TEXT TO SPEECH & MOUTH SERVO SYNC ---
+    // --- 4. ANIMATION & SOUND SYNC ---
     function speakAndAnimateMouth(text) {
       if (!('speechSynthesis' in window)) return;
-
       window.speechSynthesis.cancel(); 
+
       const utterance = new SpeechSynthesisUtterance(text);
+      const selectedOption = voiceSelect.selectedOptions[0].getAttribute('data-name');
+      utterance.voice = voices.find(v => v.name === selectedOption) || voices[0];
+      utterance.pitch = pitchRate.value;
+      utterance.rate = speedRate.value;
 
       utterance.onstart = () => {
         clearInterval(mouthInterval);
         mouthInterval = setInterval(() => {
+          // Generate a random mouth opening (20 to 80)
           const randomMouth = Math.floor(Math.random() * 60) + 20;
+          
+          // Send to Arduino Servo
           sendMQTTData(randomMouth);
-        }, 80);
+          
+          // Animate the face ON SCREEN so you can see it talking
+          robotMouth.style.height = (randomMouth / 1.5) + "px"; 
+          robotMouth.style.borderRadius = "20px";
+        }, 80); // Updates every 80ms for smooth flutter
       };
 
       utterance.onend = () => {
         clearInterval(mouthInterval);
-        sendMQTTData(0);
+        sendMQTTData(0); // Close Arduino mouth
+        robotMouth.style.height = "6px"; // Close on-screen mouth
+        robotMouth.style.borderRadius = "10px";
       };
 
       window.speechSynthesis.speak(utterance);
     }
 
-    // --- 6. MQTT TELEMETRY ---
     function sendMQTTData(mouthGap) {
       if (isConnected && mqttClient) {
         const payload = `0,0,0,0,0,${mouthGap},0,100,100\n`;
@@ -223,7 +337,7 @@
     function addChat(sender, text, type) {
       const div = document.createElement("div");
       div.className = `msg ${type}`;
-      div.innerText = `${sender}: ${text}`;
+      div.innerText = type === 'system' ? text : `${sender}: ${text}`;
       chatBox.appendChild(div);
       chatBox.scrollTop = chatBox.scrollHeight;
     }
